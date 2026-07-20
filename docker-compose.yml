@@ -1,0 +1,43 @@
+# Local development / demo stack.
+#   docker compose up -d db      → Postgres only (app runs via `npm run dev`)
+#   docker compose up --build    → full stack (app + db)
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: payroll-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: payroll
+      POSTGRES_PASSWORD: payroll
+      POSTGRES_DB: payroll
+    ports:
+      - "5432:5432"
+    volumes:
+      - payroll-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U payroll -d payroll"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    container_name: payroll-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://payroll:payroll@db:5432/payroll?schema=public
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-in-production-please}
+      AUTH_URL: http://localhost:3000
+      NEXTAUTH_URL: http://localhost:3000
+      AUTH_TRUST_HOST: "true"
+      COMPANY_NAME: ${COMPANY_NAME:-Northwind Consulting d.o.o.}
+      COMPANY_ADDRESS: ${COMPANY_ADDRESS:-Bulevar Oslobođenja 1, 11000 Beograd}
+      COMPANY_TAX_ID: ${COMPANY_TAX_ID:-RS-100200300}
+    ports:
+      - "3000:3000"
+
+volumes:
+  payroll-pgdata:

@@ -1,0 +1,288 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Payroll Processing & Salary Management System — Prisma Schema
+//
+// Design principles:
+//  * Money is stored as INTEGER MINOR UNITS (cents). Never floats. See lib/money.
+//  * PayrollRecord is IMMUTABLE once its period is PROCESSED. Tax parameters are
+//    snapshotted onto each record so historical payslips are reproducible even
+//    after TaxRule changes (documented denormalization tradeoff).
+//  * Every mutating action writes an AuditLog row for traceability.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Auth (Auth.js) ─────────────────────────────
+
+enum UserRole {
+  ADMIN // full access incl. running payroll & managing users
+  HR // manage employees, time entries, run payroll
+  VIEWER // read-only access to reports & dashboards
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  passwordHash  String? // null for OAuth-only users
+  emailVerified DateTime?
+  image         String?
+  role          UserRole  @default(VIEWER)
+  isActive      Boolean   @default(true)
+
+  accounts  Account[]
+  sessions  Session[]
+  auditLogs AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─────────────────────────────── Core Domain ────────────────────────────────
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE // deactivated / offboarded
+  ON_LEAVE
+}
+
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+}
+
+// Simplified tax categories driving which TaxRule set applies.
+enum TaxCategory {
+  STANDARD
+  REDUCED // e.g. dependents / relief
+  EXEMPT // e.g. interns below threshold
+}
+
+model Department {
+  id         String     @id @default(cuid())
+  name       String     @unique
+  code       String     @unique // short code e.g. "FIN", "ENG"
+  costCenter String?
+  employees  Employee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([code])
+}
+
+model Employee {
+  id              String         @id @default(cuid())
+  employeeNumber  String         @unique // human-facing ID e.g. "EMP-0001"
+  firstName       String
+  lastName        String
+  email           String         @unique
+  position        String
+  employmentType  EmploymentType @default(FULL_TIME)
+  employmentDate  DateTime
+  terminationDate DateTime?
+  // Monthly base salary in MINOR UNITS (cents).
+  baseSalaryCents Int
+  taxCategory     TaxCategory    @default(STANDARD)
+  status          EmployeeStatus @default(ACTIVE)
+
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+
+  timeEntries    TimeEntry[]
+  payrollRecords PayrollRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([departmentId])
+  @@index([lastName, firstName])
+}
+
+// ───────────────────────────── Time Tracking ────────────────────────────────
+
+model TimeEntry {
+  id    String @id @default(cuid())
+  // Period this timesheet applies to (first day of month, UTC).
+  year  Int
+  month Int // 1-12
+
+  regularHours  Float @default(0)
+  overtimeHours Float @default(0)
+  sickLeaveDays Int   @default(0)
+  vacationDays  Int   @default(0)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One timesheet per employee per month.
+  @@unique([employeeId, year, month])
+  @@index([year, month])
+}
+
+// ───────────────────────────── Tax Configuration ────────────────────────────
+
+// Versioned tax parameters. `effectiveFrom`/`effectiveTo` allow historical runs
+// to resolve the rule that applied at the time. Rates in BASIS POINTS (1% = 100).
+model TaxRule {
+  id                      String      @id @default(cuid())
+  name                    String
+  taxCategory             TaxCategory
+  // Progressive income-tax brackets, evaluated in order (JSON: see lib/payroll).
+  brackets                Json
+  // Employee-side social contribution rate in basis points (e.g. 1990 = 19.9%).
+  employeeContributionBps Int         @default(0)
+  // Employer-side social contribution rate in basis points (informational).
+  employerContributionBps Int         @default(0)
+  // Monthly tax-free personal allowance in MINOR UNITS (cents).
+  personalAllowanceCents  Int         @default(0)
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+  isActive      Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([taxCategory, effectiveFrom])
+}
+
+// ───────────────────────────── Payroll Processing ───────────────────────────
+
+enum PayrollStatus {
+  DRAFT // created, not yet calculated
+  PROCESSED // calculated & frozen
+  PAID // marked as disbursed
+  CANCELLED
+}
+
+model PayrollPeriod {
+  id     String        @id @default(cuid())
+  year   Int
+  month  Int // 1-12
+  status PayrollStatus @default(DRAFT)
+  notes  String?
+
+  processedAt DateTime?
+  paidAt      DateTime?
+
+  records PayrollRecord[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month])
+  @@index([status])
+}
+
+// One immutable record per employee per period. All money in MINOR UNITS.
+model PayrollRecord {
+  id       String        @id @default(cuid())
+  periodId String
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  // Inputs snapshot (so the record is reproducible & auditable) --------------
+  baseSalaryCents Int
+  regularHours    Float
+  overtimeHours   Float
+  taxCategory     TaxCategory
+  taxRuleId       String? // reference to the rule version used
+
+  // Calculated outputs (MINOR UNITS) ----------------------------------------
+  overtimePayCents     Int
+  grossSalaryCents     Int
+  taxableIncomeCents   Int
+  incomeTaxCents       Int
+  employeeContribCents Int
+  employerContribCents Int
+  netSalaryCents       Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One record per employee per period.
+  @@unique([periodId, employeeId])
+  @@index([employeeId])
+}
+
+// ───────────────────────────── Audit Trail ──────────────────────────────────
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  DEACTIVATE
+  PROCESS_PAYROLL
+  CANCEL_PAYROLL
+  MARK_PAID
+  LOGIN
+  EXPORT
+}
+
+model AuditLog {
+  id       String      @id @default(cuid())
+  action   AuditAction
+  entity   String // e.g. "Employee", "PayrollPeriod"
+  entityId String?
+  // Free-form JSON diff / metadata.
+  metadata Json?
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
