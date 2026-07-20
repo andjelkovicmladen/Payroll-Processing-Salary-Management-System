@@ -43,3 +43,6 @@ prisma/*.db-journal
 .idea
 .vscode/*
 !.vscode/extensions.json
+
+# local agent/harness config
+.claude/

@@ -102,7 +102,11 @@ async function main() {
         employeeNumber: `EMP-${String(n).padStart(4, "0")}`,
         firstName: first,
         lastName: last,
+        // ASCII-safe email: đ/Đ are standalone letters (NFD cannot decompose
+        // them), so transliterate explicitly before stripping diacritics.
         email: `${first.toLowerCase()}.${last.toLowerCase()}@payroll.local`
+          .replace(/đ/g, "d")
+          .replace(/Đ/g, "D")
           .normalize("NFD")
           .replace(/[̀-ͯ]/g, ""), // strip combining diacritics
         position,

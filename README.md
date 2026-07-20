@@ -50,15 +50,21 @@ Small and mid-sized companies routinely run payroll in spreadsheets: error-prone
 
 ## Screenshots
 
-> _Placeholders — replace with real captures after running the seed._
+> Captured from a live run against seeded data.
 
-| Dashboard | Payroll run |
+| Dashboard | Payroll register |
 | --- | --- |
 | ![Dashboard](docs/screenshots/dashboard.png) | ![Payroll](docs/screenshots/payroll.png) |
 
-| Employees | PDF payslip |
+| Employees | Time tracking (locked period) |
 | --- | --- |
-| ![Employees](docs/screenshots/employees.png) | ![Payslip](docs/screenshots/payslip.png) |
+| ![Employees](docs/screenshots/employees.png) | ![Time tracking](docs/screenshots/time-tracking.png) |
+
+| Reports | Sign in |
+| --- | --- |
+| ![Reports](docs/screenshots/reports.png) | ![Login](docs/screenshots/login.png) |
+
+A generated payslip example: [docs/screenshots/payslip_sample.pdf](docs/screenshots/payslip_sample.pdf)
 
 ## Architecture
 

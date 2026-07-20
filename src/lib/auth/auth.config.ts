@@ -11,6 +11,10 @@ export const authConfig = {
   pages: {
     signIn: "/login",
   },
+  // Derive the canonical URL from the incoming request's Host header.
+  // Required for self-hosted / Docker deployments and non-default dev ports;
+  // safe here because the app always sits behind a trusted host (or localhost).
+  trustHost: true,
   session: { strategy: "jwt" },
   callbacks: {
     // Persist role + id onto the JWT and expose them on the session.
