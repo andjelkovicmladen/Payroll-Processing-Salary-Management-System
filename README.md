@@ -264,7 +264,7 @@ npx prisma db seed          # demo users, departments, employees, one processed 
 npm run dev
 ```
 
-Open <http://localhost:3000> and sign in with a demo account:
+Open <https://payroll-processing-salary-managemen-three.vercel.app/ and sign in with a demo account:
 
 | Role | Email | Password |
 | --- | --- | --- |
