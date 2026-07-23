@@ -295,10 +295,11 @@ The test pyramid focuses on where the risk is:
 1. Push the repository to GitHub and import it in Vercel (**Add New… → Project → Import**).
 2. Provision a Postgres instance (Vercel Postgres / Neon / Supabase) and copy the **direct (unpooled)** connection string — migrations run at build time and need a direct connection.
 3. Set environment variables in Vercel → *Project Settings → Environment Variables* (all environments): `DATABASE_URL`, `AUTH_SECRET` (`openssl rand -base64 32`), `COMPANY_NAME`, `COMPANY_ADDRESS`, `COMPANY_TAX_ID`.
-4. The **Build Command** is already defined in [`vercel.json`](vercel.json) — `prisma generate && prisma migrate deploy && next build` — so migrations apply automatically on every deploy. No manual override needed.
-5. Deploy. Then seed the production database once from your machine so the demo has data:
+4. The **Build Command** is defined in [`vercel.json`](vercel.json) — `prisma generate && next build`. Migrations are applied **out-of-band** (not during the build), which keeps the build fast and free of any database dependency — the recommended production pattern.
+5. Before the first deploy (or after any schema change), apply migrations and seed from your machine against the production DB:
    ```bash
-   DATABASE_URL="<prod-direct-url>" npx prisma db seed
+   DATABASE_URL="<prod-direct-url>" npx prisma migrate deploy
+   DATABASE_URL="<prod-direct-url>" npx prisma db seed     # first time only, for demo data
    ```
 
 ### Docker (self-hosted)
